@@ -1,11 +1,10 @@
 <!doctype html>
 <html lang="zh-Hant">
-    
 <head>
-    <meta name="robots" content="noindex,nofollow" />
+  <meta name="robots" content="noindex,nofollow" />
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MNHC Pricing Tool (Offline) v0.3.9d</title>
+  <title>MNHC Pricing Tool (Offline) v0.3.15b</title>
   <style>
     :root{ --bg:#f7f5ef; --panel:#ffffff; --edge:#e7e3d9; --text:#1a1f2a; --muted:#5f6b7a; --accent:#856a52; --accent-2:#b79273; --warn:#b45309; --ok:#166534; --red:#b91c1c; --mode-nong:#fde2e4; --mode-jiu:#e7f5e9; --mode-pei:#f2e8dc }
     *,*:before,*:after{box-sizing:border-box}
@@ -31,7 +30,7 @@
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
     .col{flex:1 1 320px;min-width:280px}
     label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-    input,select,textarea,button{background:#fff;color:var(--text);border:1px solid var(--edge);border-radius:10px;padding:10px}
+    input,select,textarea,button{background:#fff;color:#1f2937;border:1px solid var(--edge);border-radius:10px;padding:10px}
     textarea{min-height:140px;width:100%}
     .btn{cursor:pointer;background:var(--accent);border:1px solid var(--accent);color:#fff;padding:8px 12px;border-radius:10px}
     .btn:hover{background:var(--accent-2);border-color:var(--accent-2)}
@@ -41,7 +40,7 @@
     .xbtn{background:#fff;border:1px solid var(--red);color:#b91c1c;border-radius:8px;line-height:1;padding:2px 8px}
 
     .grid{overflow:auto;border:1px solid var(--edge);border-radius:12px}
-    table{border-collapse:collapse;width:100%;min-width:900px;background:#fff}
+    table{border-collapse:collapse;width:100%;min-width:720px;background:#fff}
     th,td{border-bottom:1px solid var(--edge);padding:8px;vertical-align:middle}
     th{position:sticky;top:0;background:#faf8f2;white-space:nowrap}
     td{white-space:nowrap}
@@ -49,26 +48,19 @@
     .muted{color:var(--muted)}
     .banner{margin-top:8px;padding:8px 10px;border:1px dashed var(--warn);background:#fff5e8;border-radius:10px;color:#7c3e05}
 
-    /* 欄寬與對齊 */
     th.c-del,  td.c-del  {width:40px;text-align:left}
     th.c-code, td.c-code {width:110px;text-align:left}
-    th.c-name, td.c-name {
-      text-align:center;
-      width:auto; min-width:72px;
-      max-width:clamp(80px,14vw,120px);
-      text-overflow:ellipsis; overflow:hidden
-    }
+    th.c-name, td.c-name { text-align:center; width:auto; min-width:72px; max-width:clamp(80px,14vw,120px); text-overflow:ellipsis; overflow:hidden }
     th.c-qty,  td.c-qty  {width:70px;text-align:left}
     th.c-free, td.c-free {width:40px;text-align:left}
     th.c-unit, td.c-unit {width:86px;text-align:left}
+    th.c-disc, td.c-disc {width:96px;text-align:left}
     th.c-sub,  td.c-sub  {width:110px;text-align:right}
 
-    /* 隱藏數量箭頭 */
     input[type=number]::-webkit-outer-spin-button,
     input[type=number]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0 }
     input[type=number]{ -moz-appearance:textfield }
 
-    /* 可排序表頭 */
     .sortable{cursor:pointer;user-select:none}
     .sortable .arrow{font-size:10px;margin-left:4px;opacity:.6}
 
@@ -90,25 +82,70 @@
         <input id="csvFile" class="choose" type="file" accept=".csv" title="載入本地 CSV" />
         <span id="loadStatus" class="muted"></span>
         <select id="mode" class="modeSelect mode-jiu" title="選擇模式">
-          <option value="nong">農本方（按樽）</option>
-          <option value="jiu" selected>灸出（按樽）</option>
-          <option value="pei">配藥中心（按克）</option>
+          <option value="nong">農本方</option>
+          <option value="jiu" selected>零售</option>
+          <option value="pei">配藥中心</option>
         </select>
+        <button id="btnCompact" class="btn ghost" type="button" title="切換緊湊模式">緊湊模式</button>
       </div>
     </div>
 
+    <!-- 訂單區（先顯示） -->
+    <div class="card">
+      <div class="row" style="align-items:center;justify-content:space-between">
+        <div class="row" style="gap:8px">
+          <button id="btnTranslate" class="btn ghost" type="button">譯單</button>
+          <button id="btnCopyQuote" class="btn ghost" type="button">零售報價</button>
+          <button id="btnShowRetail" class="btn ghost" type="button">顯示零售價</button>
+        </div>
+        <button id="btnClearAll" class="btn warn" type="button">清空全部</button>
+      </div>
+      <div id="nongBanner" class="banner" style="display:none">農本方提示：折實後未滿 800。</div>
+
+      <div class="grid" style="margin-top:8px">
+        <table id="resultTbl">
+          <thead>
+            <tr id="theadRow">
+              <th class="c-del" aria-label="刪除"></th>
+              <th id="thCode" class="c-code sortable">產品編號<span class="arrow" id="codeArrow">↕</span></th>
+              <th class="c-name">產品名稱</th>
+              <th class="c-qty">數量</th>
+              <th class="c-free" title="不計費">免</th>
+              <!-- 農本方/零售 → 價格 + 折實價；配藥中心 → 單價 -->
+              <th id="thUnit" class="c-unit sortable">價格<span class="arrow" id="unitArrow">↕</span></th>
+              <th id="thDisc" class="c-disc">折實價</th>
+              <th class="c-sub">小計</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot>
+            <tr>
+              <th colspan="6" style="text-align:left">合計</th>
+              <th class="right" id="grandTotal" colspan="1">$0</th>
+              <th></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="mini" id="orderBadge" style="margin-top:6px;color:#5f6b7a">
+        此訂單的折扣：— ｜ 單味 0 枝；複方 0 枝；總 0 枝
+      </div>
+    </div>
+
+    <!-- 落單內容（放在後面） -->
     <div class="card">
       <div class="row">
         <div class="col">
-          <label>3) 落單內容</label>
-          <textarea id="orderInput" placeholder="輸入 -> ENTER&#10;連接詞限這些：&quot;.&quot; &quot;x&quot; &quot; &quot;&#10;只接受：A C / AxC / A.C / B C / BxC / B.C / A B C / ABC / A / B"></textarea>
+          <label>落單內容</label>
+          <textarea id="orderInput" placeholder="輸入 -> ENTER&#10;連接詞限：'.' 'x' '×' '*' '＊' ' '（空格）"></textarea>
           <div class="row" style="margin-top:8px;gap:8px;justify-content:space-between;align-items:center">
             <div style="display:flex;gap:8px;align-items:center">
-              <button id="btnParseAdd" class="btn ok">加到訂單</button>
+              <button id="btnParseAdd" class="btn ok" type="button">加到訂單</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-              <button id="btnParseReplace" class="btn">取代訂單</button>
-              <button id="btnClearInput" class="btn ghost">清空</button>
+              <button id="btnParseReplace" class="btn" type="button">取代訂單</button>
+              <button id="btnClearInput" class="btn ghost" type="button">清空</button>
             </div>
           </div>
         </div>
@@ -121,44 +158,6 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="row" style="align-items:center;justify-content:space-between">
-        <div class="row" style="gap:8px">
-          <button id="btnTranslate" class="btn ghost">譯單</button>
-          <button id="btnCopyQuote" class="btn ghost">報價</button>
-        </div>
-        <button id="btnClearAll" class="btn warn">清空全部</button>
-      </div>
-      <div id="nongBanner" class="banner" style="display:none">農本方提示：折實後未滿 800。</div>
-
-      <div class="grid" style="margin-top:8px">
-        <table id="resultTbl">
-          <thead>
-            <tr>
-              <th class="c-del" aria-label="刪除"></th>
-              <th id="thCode" class="c-code sortable">產品編號<span class="arrow" id="codeArrow">↕</span></th>
-              <th class="c-name">產品名稱</th>
-              <th class="c-qty">數量</th>
-              <th class="c-free" title="不計費">免</th>
-              <th id="thUnit" class="c-unit sortable">單價<span class="arrow" id="unitArrow">↕</span></th>
-              <th class="c-sub">小計</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-          <tfoot>
-            <tr>
-              <th colspan="5" style="text-align:left">合計</th>
-              <th class="right" id="grandTotal" colspan="1">$0</th>
-              <th></th>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      <div class="mini" id="orderBadge" style="margin-top:6px;color:#5f6b7a">
-        此訂單的折扣：— ｜ 單味 0 枝；複方 0 枝；總 0 枝
-      </div>
-    </div>
   </div>
 
 <script>
@@ -168,12 +167,15 @@ const $$ = sel => Array.from(document.querySelectorAll(sel))
 const round0 = n => Math.round((+n||0))
 const fmt2 = n => (isNaN(n)? '-' : '$'+Number(n).toFixed(2))
 const fmt0 = n => (isNaN(n)? '-' : '$'+String(round0(n)))
-const toNumber = s => { if (s==null) return NaN; const t=String(s).replace(/[,\s]/g,''); return Number(t) }
+const toNumber = s => { if (s==null) return NaN; const t=String(s).replace(/[\,\s]/g,''); return Number(t) }
 const normalizeFullHalf = s => String(s).replace(/（/g,'(').replace(/）/g,')').replace(/[０-９]/g, d=> String.fromCharCode(d.charCodeAt(0)-0xFEE0)).trim()
-const stripTailPunct = s => String(s).replace(/[。．\.、，,：:；;]+$/g,'')
+const stripTailPunct = s => String(s).replace(/[。．\.|、，,：:；;]+$/g,'')
 const normalizeCode = s => stripTailPunct(normalizeFullHalf(String(s))).replace(/[–—－﹣]/g,'-').trim()
 const stripTrailingZero = x => String(x).replace(/\.0$/,'')
 const normNameStrict = s => String(s).replace(/[\s·\.\-_/、，,；;:：\(\)\[\]{}「」『』“”"']/g,'')
+const isSecure = () => window.isSecureContext === true
+
+function toast(msg){ alert(msg) }
 
 // CSV parse (simple)
 function parseCSV(text){
@@ -194,7 +196,8 @@ const HEADER_MAP = new Map([
   ['品名','品名'], ['產品名稱','品名'], ['名稱','品名'], ['name','品名'], ['Name','品名'],
   ['批發價','批發價'], ['參考零售價','參考零售價'], ['公價產品','公價產品'],
   ['濃度(倍)','濃度(倍)'], ['濃度（倍）','濃度(倍)'], ['濃度','濃度(倍)'],
-  ['裝量','裝量'], ['裝量_g','裝量_g']
+  ['裝量','裝量'], ['裝量_g','裝量_g'],
+  ['公價零售可折','公價零售可折']
 ])
 function normalizeHeaders(cols){
   return cols.map(c=>{
@@ -227,11 +230,14 @@ function classify(code){
 
 // ===== State =====
 let DB=[]
-let MODE='jiu' // 預設灸出
-let cartItems=[] // {rec, qty, noCharge}
-let sortState = { key:'unit', asc:true } // 'unit' or 'code'
+let MODE='jiu' // 內部 key；對外顯示為「零售」
+let cartItems=[] // {rec, qty, noCharge, seq}
+let sortState = { key:'input', asc:true } // 預設按輸入次序
+let nextSeq = 0 // 保留原始輸入順序用
+// 自然排序（含數字），修復產品編號排序
+const CODE_COLLATOR = new Intl.Collator(undefined, {numeric:true, sensitivity:'base'})
 
-// ===== UI mode & discounts =====
+// ===== Mode & discounts =====
 function setModeBg(){
   const sel=$('#mode')
   sel.classList.remove('mode-nong','mode-jiu','mode-pei')
@@ -250,7 +256,7 @@ function renderDiscounts(){
       <div class="field"><label>≤2枝折扣</label><input id="jiuDiscFew" value="80" /></div>
       <div class="field"><label>≥3枝折扣</label><input id="jiuDiscMany" value="66" /></div>`
   }else{
-    box.innerHTML = `<div class="field"><label>配藥加成%</label><input id="markPei" value="110" /></div>`
+    box.innerHTML = `<div class="field"><label>加成%</label><input id="markPei" value="110" /></div>`
   }
 }
 function readPercentInput(id, def){ const el=$(id); if(!el) return def; const v = toNumber(el.value); return isNaN(v)? def : v }
@@ -265,7 +271,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 })
 $('#btnClearInput')?.addEventListener('click',()=>{ $('#orderInput').value='' })
 
-// ===== Load CSV (mobile-friendly with FileReader fallback) =====
+// ===== Load CSV =====
 async function readFileAsText(file){
   if (file && typeof file.text === 'function') {
     try { return await file.text() } catch(e){}
@@ -303,6 +309,8 @@ $('#csvFile').addEventListener('change', async (e)=>{
     const normHeader = normalizeHeaders(header)
     const idx = Object.fromEntries(normHeader.map((h,i)=>[h,i]))
 
+    const yn = s => /^y/i.test(String(s||'').trim())
+
     DB = rows.map(r=>({
       代碼: String(r[idx['代碼']] ?? '').trim(),
       品名: String(r[idx['品名']] ?? '').trim(),
@@ -313,7 +321,8 @@ $('#csvFile').addEventListener('change', async (e)=>{
             || /是|yes/i.test(String(r[idx['公價產品']] ?? '')),
       濃度倍: toNumber(r[idx['濃度(倍)']]) || 1,
       裝量: normalizeFullHalf(r[idx['裝量']] ?? ''),
-      裝量_g: toNumber(r[idx['裝量_g']]) || parseGrams(r[idx['裝量']])
+      裝量_g: toNumber(r[idx['裝量_g']]) || parseGrams(r[idx['裝量']]),
+      公價零售可折: yn(r[idx['公價零售可折']])
     })).filter(x=>x.代碼 || x.品名)
 
     updateLoadStatus(DB.length, true)
@@ -325,7 +334,7 @@ $('#csvFile').addEventListener('change', async (e)=>{
   }
 })
 
-// ===== Parser（嚴格規則 + A/B 預設 1） =====
+// ===== Parser =====
 function findByCode(token){ const key = normalizeCode(token).toUpperCase(); return DB.find(r=> normalizeCode(r.代碼).toUpperCase() === key ) }
 function findByName(token){ const key = normNameStrict(token); return DB.find(r=> normNameStrict(r.品名) === key ) }
 function parseLineStrict(lineRaw){
@@ -334,11 +343,11 @@ function parseLineStrict(lineRaw){
   const tryPush = (rec, qty) => rec && !isNaN(qty) ? {rec, qty:Number(qty), noCharge:false} : null
   let m
   m = s0.match(/^(\S+)\s+(\d+(?:\.\d+)?)$/);   if(m){ const r=findByCode(m[1]); if(r) return tryPush(r,m[2]) }
-  m = s0.match(/^(\S+)\s*[xX]\s*(\d+(?:\.\d+)?)$/); if(m){ const r=findByCode(m[1]); if(r) return tryPush(r,m[2]) }
-  m = s0.match(/^(\S+)\s*\.\s*(\d+(?:\.\d+)?)$/);   if(m){ const r=findByCode(m[1]); if(r) return tryPush(r,m[2]) }
+  m = s0.match(/^(\S+)\s*[xX×＊*]\s*(\d+(?:\.\d+)?)$/); if(m){ const r=findByCode(m[1]); if(r) return tryPush(r,m[2]) }
+  m = s0.match(/^(\S+)\s*[\.|．]\s*(\d+(?:\.\d+)?)$/);   if(m){ const r=findByCode(m[1]); if(r) return tryPush(r,m[2]) }
   m = s0.match(/^(.+?)\s+(\d+(?:\.\d+)?)$/);   if(m){ const r=findByName(m[1]); if(r) return tryPush(r,m[2]) }
-  m = s0.match(/^(.+?)\s*[xX]\s*(\d+(?:\.\d+)?)$/); if(m){ const r=findByName(m[1]); if(r) return tryPush(r,m[2]) }
-  m = s0.match(/^(.+?)\s*\.\s*(\d+(?:\.\d+)?)$/);   if(m){ const r=findByName(m[1]); if(r) return tryPush(r,m[2]) }
+  m = s0.match(/^(.+?)\s*[xX×＊*]\s*(\d+(?:\.\d+)?)$/); if(m){ const r=findByName(m[1]); if(r) return tryPush(r,m[2]) }
+  m = s0.match(/^(.+?)\s*[\.|．]\s*(\d+(?:\.\d+)?)$/);   if(m){ const r=findByName(m[1]); if(r) return tryPush(r,m[2]) }
   m = s0.match(/^(\S+)\s+(.+?)\s+(\d+(?:\.\d+)?)$/); if(m){ const r=findByCode(m[1]); if(r && normNameStrict(m[2])===normNameStrict(r.品名)) return tryPush(r,m[3]) }
   m = s0.match(/^(.+?)(\d+(?:\.\d+)?)$/);
   if(m){ let r=findByCode(m[1]); if(r) return tryPush(r,m[2]); r=findByName(m[1]); if(r) return tryPush(r,m[2]) }
@@ -356,45 +365,13 @@ function parseOrderLines(text){
   return {ok, bad, tokens}
 }
 
-// ===== Suggestions =====
-function bigramSet(s){ const arr=[]; for(let i=0;i<s.length-1;i++) arr.push(s.slice(i,i+2)); return new Set(arr) }
-function dice(a,b){ if(a.length<2||b.length<2) return 0; const A=bigramSet(a), B=bigramSet(b); let inter=0; A.forEach(x=>{ if(B.has(x)) inter++ }); return (2*inter)/(A.size+B.size) }
-function suggestionsForToken(token){
-  const q=normNameStrict(token).toLowerCase()
-  const scored = DB.map(r=>{
-    const name=normNameStrict(String(r.品名||'')).toLowerCase()
-    const code=normalizeCode(String(r.代碼||'')).toLowerCase()
-    let s=0
-    if(name.includes(q)) s+=0.6
-    if(code.startsWith(q)) s+=0.4
-    s+= dice(name,q)*0.6
-    return {r, s}
-  }).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,5)
-  return scored.map(x=>`${normalizeCode(x.r.代碼)} ${x.r.品名}`)
-}
-function renderSuggestions(tokens){
-  const box=$('#suggestBox'), list=$('#suggestList')
-  if(!tokens || tokens.length===0){ box.style.display='none'; list.innerHTML=''; return }
-  list.innerHTML=''
-  tokens.forEach(({token})=>{
-    const sug = suggestionsForToken(token)
-    const div=document.createElement('div')
-    div.className='hint'
-    div.textContent = `「${token}」→ ${sug.length? sug.join('， ') : '（無建議）'}`
-    list.appendChild(div)
-  })
-  box.style.display='block'
+// ===== Helpers: eligible counting =====
+function retailEligibleQty(){
+  // 零售模式：僅計「公價零售可折 = Y」的商品
+  return cartItems.reduce((s,it)=>{ if(it.rec && it.rec.公價零售可折) s += (Number(it.qty)||0); return s }, 0)
 }
 
-// ===== Jiuchu eligible qty (exclude public-priced items) =====
-function jiuchuEligibleQty(){
-  return cartItems.reduce((s,it)=>{
-    if(it.rec && !it.rec.公價產品) s += (Number(it.qty)||0)
-    return s
-  }, 0)
-}
-
-// ===== Pricing =====
+// ===== Pricing (base + discounted) =====
 function currentPercents(){
   if(MODE==='nong'){
     return { dSingle: readPercentInput('#dSingle', 75)/100, dCombo: readPercentInput('#dCombo', 75)/100 }
@@ -402,43 +379,45 @@ function currentPercents(){
   if(MODE==='jiu'){
     const few = readPercentInput('#jiuDiscFew', 80)/100
     const many = readPercentInput('#jiuDiscMany', 66)/100
-    return { jiuFew: few, jiuMany: many }
+    return { retailFew: few, retailMany: many }
   }
   return { markPei: readPercentInput('#markPei', 110)/100 }
 }
-function priceItem(rec, qty, noCharge=false){
-  if(noCharge) return {unit:0, sub:0}
+
+function computeUnits(rec, qty, noCharge=false){
+  if(noCharge) return { base:0, eff:0 }
   const type = classify(rec.代碼)
   if(MODE==='nong'){
     const {dSingle, dCombo} = currentPercents()
-    const d = (type==='單味')? dSingle : dCombo
+    const disc = (type==='單味')? dSingle : dCombo
+    const base = Number(rec.批發價)
+    // 農本方：不是公價 → 可折；公價 → 不折（折實 = 批發價）
     if(rec.公價產品){
-      const unit = rec.參考零售價
-      return {unit, sub: unit*qty}
+      const eff = base
+      return { base, eff }
     }
-    const unit = rec.批發價 * d
-    return {unit, sub: unit*qty}
+    const eff = base * disc
+    return { base, eff }
   }
   if(MODE==='jiu'){
-    const {jiuFew, jiuMany} = currentPercents()
-    if(rec.公價產品){
-      const unit = round0(rec.參考零售價) // 不打折，仍以整數顯示
-      return {unit, sub: unit*qty, public:true}
-    }
-    const eligible = jiuchuEligibleQty()
-    const disc = (eligible<=2 ? jiuFew : jiuMany)
-    const unit = round0(rec.參考零售價 * disc) // 單價先四捨五入
-    return {unit, sub: unit*qty}
+    const {retailFew, retailMany} = currentPercents()
+    const base = round0(rec.參考零售價)
+    const eligible = retailEligibleQty()
+    const d = (eligible<=2 ? retailFew : retailMany)
+    const canDisc = !!rec.公價零售可折
+    const eff = canDisc ? round0(base * d) : base
+    return { base, eff }
   }
+  // 配藥中心：維持舊規則（按克計）
   const {markPei} = currentPercents()
   const grams = rec.裝量_g || parseGrams(rec.裝量)
   const unitPerG = grams? (rec.批發價 * markPei / grams) : NaN
-  return {unit: unitPerG, sub: unitPerG*qty}
+  return { base: unitPerG, eff: unitPerG }
 }
 
 // ===== Cart helpers & badge =====
-function addItems(parsed){ cartItems = cartItems.concat(parsed.map(it => ({...it, noCharge: !!it.noCharge}))); onCartChanged() }
-function replaceItems(parsed){ cartItems = parsed.map(it => ({...it, noCharge: !!it.noCharge})); onCartChanged() }
+function addItems(parsed){ cartItems = cartItems.concat(parsed.map(it => ({...it, noCharge: !!it.noCharge, seq: nextSeq++}))); onCartChanged() }
+function replaceItems(parsed){ nextSeq = 0; cartItems = parsed.map(it => ({...it, noCharge: !!it.noCharge, seq: nextSeq++})); onCartChanged() }
 function removeIndex(idx){ cartItems.splice(idx,1); onCartChanged() }
 function clearAll(){ cartItems = []; onCartChanged() }
 
@@ -466,37 +445,41 @@ function updateOrderBadge(){
     const manyPct = readPercentInput('#jiuDiscMany',66)
     const shownFew = stripTrailingZero((fewPct/10).toFixed(1))
     const shownMany = stripTrailingZero((manyPct/10).toFixed(1))
-    const elig = jiuchuEligibleQty()
-    text = `灸出折扣（僅計非公價商品門檻） ≤2枝：${shownFew} 折；≥3枝：${shownMany} 折 ｜ 當前計入枝數：${elig}`
+    const elig = retailEligibleQty()
+    text = `零售折扣（僅計可折產品） ≤2枝：${shownFew} 折；≥3枝：${shownMany} 折 ｜ 當前計入枝數：${elig}`
   }else{
     const mp = readPercentInput('#markPei',110)
-    text = `配藥中心加成 ${mp}%`
+    text = `加成 ${mp}%（按克）`
   }
   const c = counts()
   $('#orderBadge').textContent = `此訂單的折扣：${text} ｜ 單味 ${c.single} 枝；複方 ${c.combo} 枝；總 ${c.total} 枝`
 }
 
-// ===== Render table（支援「單價 / 產品編號」排序） =====
 function onCartChanged(){ renderTable() }
 function renderTable(){
   const tb = $('#resultTbl tbody'); tb.innerHTML=''
 
+  // 表頭切換：配藥中心→只顯示單價；其他模式→價格+折實價
+  const thUnit=$('#thUnit'), thDisc=$('#thDisc')
+  if(MODE==='pei'){
+    thUnit.textContent = '單價'
+    thDisc.style.display='none'
+  }else{
+    thUnit.textContent = (MODE==='nong' ? '批發價' : '零售價')
+    thDisc.style.display=''
+  }
+
+  const dir = sortState.asc ? 1 : -1
   const view = cartItems.map((it, i) => {
-    const p = priceItem(it.rec, it.qty, it.noCharge)
-    return {
-      __i:i,
-      unit: p.unit,
-      sub: p.sub,
-      codeKey: normalizeCode(it.rec.代碼).toUpperCase()
-    }
+    const p = computeUnits(it.rec, it.qty, it.noCharge)
+    return { __i:i, base:p.base, eff:p.eff, sub:(p.eff||0)*(Number(it.qty)||0), codeKey: normalizeCode(it.rec.代碼).toUpperCase(), seq: it.seq ?? i }
   }).sort((a,b)=>{
-    const dir = sortState.asc ? 1 : -1
     if(sortState.key==='unit'){
-      return dir * ((a.unit||0) - (b.unit||0))
-    }else{
-      if(a.codeKey < b.codeKey) return -1*dir
-      if(a.codeKey > b.codeKey) return  1*dir
-      return 0
+      return dir * ((a.eff||0) - (b.eff||0))
+    } else if (sortState.key==='code'){
+      return dir * CODE_COLLATOR.compare(a.codeKey, b.codeKey)
+    } else { // 'input' 原始輸入順序
+      return dir * ((a.seq||0) - (b.seq||0))
     }
   })
 
@@ -505,26 +488,29 @@ function renderTable(){
     const idx = row.__i
     const it = cartItems[idx]
     const {rec, qty, noCharge} = it
-    const unit = row.unit
+    const base = row.base
+    const eff  = row.eff
     const sub  = row.sub
     total += (sub||0)
 
-    const showUnit = (MODE==='jiu'? fmt0(unit) : fmt2(unit))
+    const showBase = (MODE==='jiu'? fmt0(base) : fmt2(base))
+    const showEff  = (MODE==='jiu'? fmt0(eff)  : fmt2(eff))
     const showSub  = (MODE==='jiu'? fmt0(sub)  : fmt2(sub))
 
     const tr = document.createElement('tr')
     tr.innerHTML = `
-      <td class="c-del"><button class="xbtn" title="刪除" data-idx="${idx}">×</button></td>
-      <td class="c-code">${normalizeCode(rec.代碼)||''}</td>
-      <td class="c-name" title="${rec.品名||''}">${rec.品名||''}</td>
-      <td class="c-qty">
-        <input class="qtyInput" data-idx="${idx}" type="number" min="0" step="1" value="${qty}" style="width:64px;text-align:left;padding:6px 8px;border:1px solid var(--edge);border-radius:8px">
+      <td class=\"c-del\"><button class=\"xbtn\" title=\"刪除\" data-idx=\"${idx}\">×</button></td>
+      <td class=\"c-code\">${normalizeCode(rec.代碼)||''}</td>
+      <td class=\"c-name\" title=\"${rec.品名||''}\">${rec.品名||''}</td>
+      <td class=\"c-qty\">
+        <input class=\"qtyInput\" data-idx=\"${idx}\" type=\"number\" inputmode=\"numeric\" min=\"0\" step=\"1\" value=\"${qty}\" style=\"width:64px;text-align:left;padding:6px 8px;border:1px solid var(--edge);border-radius:8px\">
       </td>
-      <td class="c-free">
-        <input type="checkbox" class="freeChk" data-idx="${idx}" ${noCharge?'checked':''} title="不計費">
+      <td class=\"c-free\">
+        <input type=\"checkbox\" class=\"freeChk\" data-idx=\"${idx}\" ${noCharge?'checked':''} title=\"不計費\">
       </td>
-      <td class="c-unit">${showUnit}</td>
-      <td class="c-sub right">${showSub}</td>`
+      <td class=\"c-unit\">${showBase}</td>
+      ${MODE==='pei' ? '' : `<td class=\"c-disc\">${showEff}</td>`}
+      <td class=\"c-sub right\">${showSub}</td>`
     tb.appendChild(tr)
   })
 
@@ -532,62 +518,39 @@ function renderTable(){
   $('#nongBanner').style.display = (MODE==='nong' && total<800 && cartItems.length>0)? 'block':'none'
   updateOrderBadge()
 
-  // 行內事件
-  $$('#resultTbl .xbtn').forEach(btn=>btn.addEventListener('click',e=>{
-    const i=Number(e.target.getAttribute('data-idx')); removeIndex(i)
-  }))
+  $$('#resultTbl .xbtn').forEach(btn=>btn.addEventListener('click',e=>{ const i=Number(e.target.getAttribute('data-idx')); removeIndex(i) }))
   $$('#resultTbl .qtyInput').forEach(inp=>{
-    inp.addEventListener('input', e=>{
-      const i=Number(e.target.dataset.idx); const v=Number(e.target.value)
-      cartItems[i].qty = isNaN(v)||v<0? 0 : v; renderTable()
-    })
+    inp.addEventListener('input', e=>{ const i=Number(e.target.dataset.idx); const v=Number(e.target.value); cartItems[i].qty = isNaN(v)||v<0? 0 : v; renderTable() })
   })
-  $$('#resultTbl .freeChk').forEach(ch=>{
-    ch.addEventListener('change', e=>{
-      const i=Number(e.target.dataset.idx)
-      cartItems[i].noCharge = e.target.checked
-      renderTable()
-    })
-  })
+  $$('#resultTbl .freeChk').forEach(ch=>{ ch.addEventListener('change', e=>{ const i=Number(e.target.dataset.idx); cartItems[i].noCharge = e.target.checked; renderTable() }) })
 }
 
-// ===== Copy helpers =====
-function currentPercents(){
-  if(MODE==='nong'){
-    return { dSingle: readPercentInput('#dSingle', 75)/100, dCombo: readPercentInput('#dCombo', 75)/100 }
-  }
-  if(MODE==='jiu'){
-    const few = readPercentInput('#jiuDiscFew', 80)/100
-    const many = readPercentInput('#jiuDiscMany', 66)/100
-    return { jiuFew: few, jiuMany: many }
-  }
-  return { markPei: readPercentInput('#markPei', 110)/100 }
-}
 function buildQuoteText(){
   const lines=[]
   if(MODE==='jiu'){
-    const {jiuFew, jiuMany} = currentPercents()
-    const elig = jiuchuEligibleQty()
-    const pct = (elig<=2? jiuFew: jiuMany)*100
+    const {retailFew, retailMany} = currentPercents()
+    const elig = retailEligibleQty()
+    const pct = (elig<=2? retailFew: retailMany)*100
     const shown = stripTrailingZero((pct/10).toFixed(1))
-    lines.push(`報價為${shown}折（門檻僅計非公價商品，當前 ${elig} 枝）`)
+    lines.push(`零售報價：${shown}折（僅計可折產品，當前 ${elig} 枝）`)
+  }else if(MODE==='nong'){
+    const {dSingle, dCombo} = currentPercents()
+    const shownS = stripTrailingZero((dSingle*10).toFixed(1))
+    const shownC = stripTrailingZero((dCombo*10).toFixed(1))
+    lines.push(`農本方報價：單味 ${shownS} 折、複方 ${shownC} 折`)
+  }else{
+    lines.push('配藥中心報價（按克）：')
   }
   cartItems.forEach(it=>{
     const {rec, noCharge} = it
-    const {unit, sub} = priceItem(rec, it.qty, noCharge)
-    const showUnit = (MODE==='jiu'? fmt0(unit) : fmt2(unit))
+    const {base, eff} = computeUnits(rec, it.qty, noCharge)
+    const showBase = (MODE==='jiu'? fmt0(base) : fmt2(base))
+    const showEff  = (MODE==='jiu'? fmt0(eff)  : fmt2(eff))
+    const sub      = (eff||0)*(Number(it.qty)||0)
     const showSub  = (MODE==='jiu'? fmt0(sub)  : fmt2(sub))
-    const pub = rec.公價產品 ? '（公價）' : ''
-    lines.push(`${normalizeCode(rec.代碼)} ${rec.品名}${pub} ×${it.qty} ｜ 單價 ${showUnit} ｜ 小計 ${showSub}${noCharge?' ｜ 不計費':''}`)
+    lines.push(`${normalizeCode(rec.代碼)} ${rec.品名} ×${it.qty} ｜ 價格 ${showBase} ｜ 折實價 ${showEff} ｜ 小計 ${showSub}${noCharge?' ｜ 不計費':''}`)
   })
   lines.push(`合計：${$('#grandTotal').textContent}`)
-  if(MODE==='jiu'){
-    lines.push('')
-    lines.push('付款資訊：')
-    lines.push('轉數快：54097239')
-    lines.push('匯豐 HSBC：642-040976-838')
-    lines.push('戶口名稱：PAPL t／a Mnhc')
-  }
   return lines.join('\n')
 }
 function buildTranslateText(){
@@ -595,13 +558,37 @@ function buildTranslateText(){
   const qtys  = cartItems.map(it=>String(it.qty))
   return codes.join('\n') + '\n\n' + qtys.join('\n')
 }
-function copyText(txt){
-  return navigator.clipboard.writeText(txt).catch(()=>{
-    const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+function buildRetailPriceText(){
+  const lines=['顯示零售價：']
+  cartItems.forEach(it=>{
+    const unit = round0(Number(it.rec.參考零售價))
+    lines.push(`${normalizeCode(it.rec.代碼)} ${it.rec.品名} ｜ 零售價 ${fmt0(unit)}`)
   })
+  return lines.join('\n')
 }
 
-// ===== Wire buttons & keys =====
+async function copyText(txt){
+  try{
+    if(navigator.clipboard && isSecure()){
+      await navigator.clipboard.writeText(txt)
+      toast('已複製。')
+      return true
+    }
+  }catch(e){}
+  try{
+    const ta=document.createElement('textarea')
+    ta.value=txt; ta.setAttribute('readonly','')
+    ta.style.position='fixed'; ta.style.left='-9999px'
+    document.body.appendChild(ta)
+    ta.focus(); ta.select();
+    const ok=document.execCommand('copy')
+    document.body.removeChild(ta)
+    if(ok){ toast('已複製。'); return true }
+  }catch(e){}
+  alert('請手動全選→複製：\n\n'+txt)
+  return false
+}
+
 function handleParse(add=false){
   const {ok, bad, tokens} = parseOrderLines($('#orderInput').value)
   if(add) addItems(ok); else replaceItems(ok)
@@ -611,21 +598,20 @@ function handleParse(add=false){
 $('#btnParseReplace').addEventListener('click', ()=>handleParse(false))
 $('#btnParseAdd').addEventListener('click', ()=>handleParse(true))
 $('#btnClearAll').addEventListener('click',()=>{ clearAll() })
-$('#btnCopyQuote').addEventListener('click',()=>{ copyText(buildQuoteText()).then(()=>alert('已複製。')) })
-$('#btnTranslate').addEventListener('click',()=>{ copyText(buildTranslateText()).then(()=>alert('已複製。')) })
+$('#btnCopyQuote').addEventListener('click',()=>{ copyText(buildQuoteText()) })
+$('#btnShowRetail').addEventListener('click',()=>{ copyText(buildRetailPriceText()) })
+$('#btnTranslate').addEventListener('click',()=>{ copyText(buildTranslateText()) })
 
 $('#orderInput').addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleParse(true) }
 })
 
-// 折扣欄位即時生效
 function bindDiscountInputs(){ ['#dSingle','#dCombo','#jiuDiscFew','#jiuDiscMany','#markPei'].forEach(sel=>{
   const el=$(sel); if(!el) return;
   el.addEventListener('input', ()=>{ renderTable() });
   el.addEventListener('change', ()=>{ renderTable() })
 }) }
 
-// 表頭排序事件
 $('#thUnit').addEventListener('click', ()=>{
   sortState = { key:'unit', asc: (sortState.key==='unit' ? !sortState.asc : true) }
   $('#unitArrow').textContent = sortState.key==='unit' ? (sortState.asc ? '↑' : '↓') : '↕'
@@ -638,6 +624,10 @@ $('#thCode').addEventListener('click', ()=>{
   $('#unitArrow').textContent = '↕'
   renderTable()
 })
+
+// 外觀：緊湊模式切換
+const rootWrap = document.querySelector('.wrap')
+$('#btnCompact')?.addEventListener('click',()=>{ rootWrap.classList.toggle('compact') })
 </script>
 </body>
 </html>
