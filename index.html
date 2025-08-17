@@ -4,7 +4,7 @@
   <meta name="robots" content="noindex,nofollow" />
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MNHC Pricing Tool (Offline) v0.3.15b</title>
+  <title>MNHC Pricing Tool (Offline) v0.3.18</title>
   <style>
     :root{ --bg:#f7f5ef; --panel:#ffffff; --edge:#e7e3d9; --text:#1a1f2a; --muted:#5f6b7a; --accent:#856a52; --accent-2:#b79273; --warn:#b45309; --ok:#166534; --red:#b91c1c; --mode-nong:#fde2e4; --mode-jiu:#e7f5e9; --mode-pei:#f2e8dc }
     *,*:before,*:after{box-sizing:border-box}
@@ -69,7 +69,7 @@
     .hint{font-size:12px;color:var(--muted)}
     .suggest{margin-top:8px;border:1px solid var(--edge);border-radius:10px;padding:8px;background:#fff}
     .suggest h4{margin:0 0 6px;font-size:12px;color:#6b7280}
-    .suglist{display:grid;grid-template-columns:1fr;gap:4px}
+    .suglist{font-size:12px;color:#444;display:grid;grid-template-columns:1fr;gap:4px;white-space:nowrap}
   </style>
 </head>
 <body>
@@ -111,9 +111,8 @@
               <th class="c-name">產品名稱</th>
               <th class="c-qty">數量</th>
               <th class="c-free" title="不計費">免</th>
-              <!-- 農本方/零售 → 價格 + 折實價；配藥中心 → 單價 -->
-              <th id="thUnit" class="c-unit sortable">價格<span class="arrow" id="unitArrow">↕</span></th>
-              <th id="thDisc" class="c-disc">折實價</th>
+              <th id="thUnit" class="c-unit">價格</th>
+              <th id="thDisc" class="c-disc sortable">折實價<span class="arrow" id="discArrow">↕</span></th>
               <th class="c-sub">小計</th>
             </tr>
           </thead>
@@ -151,7 +150,7 @@
         </div>
         <div class="col">
           <div id="suggestBox" class="suggest" style="display:none">
-            <h4>未能解析的項目，可能是以下商品（僅供參考）：</h4>
+            <h4>未能解析的項目（前 5 筆候選；若超過將顯示「……等等」）：</h4>
             <div id="suggestList" class="suglist"></div>
           </div>
         </div>
@@ -177,7 +176,7 @@ const isSecure = () => window.isSecureContext === true
 
 function toast(msg){ alert(msg) }
 
-// CSV parse (simple)
+// CSV parse (simple, RFC4180-ish)
 function parseCSV(text){
   const rows=[]; let i=0, field='', row=[], inQ=false
   while(i<text.length){
@@ -230,11 +229,10 @@ function classify(code){
 
 // ===== State =====
 let DB=[]
-let MODE='jiu' // 內部 key；對外顯示為「零售」
+let MODE='jiu' // 顯示為「零售」
 let cartItems=[] // {rec, qty, noCharge, seq}
 let sortState = { key:'input', asc:true } // 預設按輸入次序
-let nextSeq = 0 // 保留原始輸入順序用
-// 自然排序（含數字），修復產品編號排序
+let nextSeq = 0 // 保留原始輸入順序
 const CODE_COLLATOR = new Intl.Collator(undefined, {numeric:true, sensitivity:'base'})
 
 // ===== Mode & discounts =====
@@ -265,6 +263,7 @@ $('#mode').addEventListener('change',e=>{
   MODE=e.target.value
   setModeBg(); renderDiscounts(); bindDiscountInputs(); renderTable()
 })
+
 document.addEventListener('DOMContentLoaded', ()=>{
   $('#mode').value='jiu'
   setModeBg(); renderDiscounts(); bindDiscountInputs(); renderTable()
@@ -365,9 +364,49 @@ function parseOrderLines(text){
   return {ok, bad, tokens}
 }
 
+// ===== Suggestions (plain text, top-5, with "……等等") =====
+function scoreToken(rawKey, rec){
+  const keyName = normNameStrict(normalizeFullHalf(rawKey)).toUpperCase()
+  const keyCode = normalizeCode(rawKey).toUpperCase().replace(/[^A-Z0-9]/g,'')
+  const code = normalizeCode(rec.代碼).toUpperCase()
+  const codeFlat = code.replace(/[^A-Z0-9]/g,'')
+  const name = normNameStrict(rec.品名).toUpperCase()
+  let s = 0
+  if(!keyName && !keyCode) return 0
+  if(keyCode){ if(codeFlat.startsWith(keyCode)) s += 8; else if(codeFlat.includes(keyCode)) s += 5 }
+  if(keyName){ if(name.includes(keyName)) s += 4 }
+  if(/^[0-9]+$/.test(keyCode) && /^[0-9]+$/.test(codeFlat)){
+    if(codeFlat.startsWith(keyCode)) s += 2; else if(codeFlat.includes(keyCode)) s += 1
+  }
+  return s
+}
+function renderSuggestions(tokens){
+  const box = document.getElementById('suggestBox')
+  const list = document.getElementById('suggestList')
+  if(!tokens || tokens.length===0){ box.style.display='none'; list.innerHTML=''; return }
+  const fragments = []
+  tokens.forEach(({token})=>{
+    const raw = String(token||'').trim()
+    if(!raw) return
+    const scored = DB.map(r=>({r, score: scoreToken(raw, r)})).filter(x=>x.score>0)
+    scored.sort((a,b)=> b.score - a.score)
+    if(scored.length===0) return
+    const top = scored.slice(0,5)
+    fragments.push(`<div class="hint">「${raw}」可能是：</div>`)
+    top.forEach(({r})=>{
+      const code = normalizeCode(r.代碼)
+      const name = r.品名 || ''
+      fragments.push(`<div>・${code}　${name}</div>`)
+    })
+    if(scored.length>5){ fragments.push('<div class="muted">……等等</div>') }
+  })
+  list.innerHTML = fragments.join('')
+  box.style.display = fragments.length? 'block' : 'none'
+}
+
 // ===== Helpers: eligible counting =====
 function retailEligibleQty(){
-  // 零售模式：僅計「公價零售可折 = Y」的商品
+  // 零售模式：僅計「公價零售可折 = Y」
   return cartItems.reduce((s,it)=>{ if(it.rec && it.rec.公價零售可折) s += (Number(it.qty)||0); return s }, 0)
 }
 
@@ -391,7 +430,7 @@ function computeUnits(rec, qty, noCharge=false){
     const {dSingle, dCombo} = currentPercents()
     const disc = (type==='單味')? dSingle : dCombo
     const base = Number(rec.批發價)
-    // 農本方：不是公價 → 可折；公價 → 不折（折實 = 批發價）
+    // 農本方：公價不折（折實=批發價）；非公價可折
     if(rec.公價產品){
       const eff = base
       return { base, eff }
@@ -408,7 +447,7 @@ function computeUnits(rec, qty, noCharge=false){
     const eff = canDisc ? round0(base * d) : base
     return { base, eff }
   }
-  // 配藥中心：維持舊規則（按克計）
+  // 配藥中心：按克計
   const {markPei} = currentPercents()
   const grams = rec.裝量_g || parseGrams(rec.裝量)
   const unitPerG = grams? (rec.批發價 * markPei / grams) : NaN
@@ -457,16 +496,16 @@ function updateOrderBadge(){
 
 function onCartChanged(){ renderTable() }
 function renderTable(){
-  const tb = $('#resultTbl tbody'); tb.innerHTML=''
+  const tb = $('#resultTbl tbody'); if(!tb) return; tb.innerHTML=''
 
-  // 表頭切換：配藥中心→只顯示單價；其他模式→價格+折實價
+  // 表頭顯示（注意：不要覆寫帶箭頭的表頭）
   const thUnit=$('#thUnit'), thDisc=$('#thDisc')
   if(MODE==='pei'){
-    thUnit.textContent = '單價'
-    thDisc.style.display='none'
+    if(thUnit) thUnit.textContent = '單價'
+    if(thDisc) thDisc.style.display='none'
   }else{
-    thUnit.textContent = (MODE==='nong' ? '批發價' : '零售價')
-    thDisc.style.display=''
+    if(thUnit) thUnit.textContent = (MODE==='nong' ? '批發價' : '價格')
+    if(thDisc) thDisc.style.display=''
   }
 
   const dir = sortState.asc ? 1 : -1
@@ -474,11 +513,11 @@ function renderTable(){
     const p = computeUnits(it.rec, it.qty, it.noCharge)
     return { __i:i, base:p.base, eff:p.eff, sub:(p.eff||0)*(Number(it.qty)||0), codeKey: normalizeCode(it.rec.代碼).toUpperCase(), seq: it.seq ?? i }
   }).sort((a,b)=>{
-    if(sortState.key==='unit'){
+    if(sortState.key==='disc'){
       return dir * ((a.eff||0) - (b.eff||0))
     } else if (sortState.key==='code'){
       return dir * CODE_COLLATOR.compare(a.codeKey, b.codeKey)
-    } else { // 'input' 原始輸入順序
+    } else { // 'input'
       return dir * ((a.seq||0) - (b.seq||0))
     }
   })
@@ -612,20 +651,21 @@ function bindDiscountInputs(){ ['#dSingle','#dCombo','#jiuDiscFew','#jiuDiscMany
   el.addEventListener('change', ()=>{ renderTable() })
 }) }
 
-$('#thUnit').addEventListener('click', ()=>{
-  sortState = { key:'unit', asc: (sortState.key==='unit' ? !sortState.asc : true) }
-  $('#unitArrow').textContent = sortState.key==='unit' ? (sortState.asc ? '↑' : '↓') : '↕'
-  $('#codeArrow').textContent = '↕'
-  renderTable()
-})
+// ===== Sort header handlers (固定存在的箭頭) =====
 $('#thCode').addEventListener('click', ()=>{
   sortState = { key:'code', asc: (sortState.key==='code' ? !sortState.asc : true) }
   $('#codeArrow').textContent = sortState.key==='code' ? (sortState.asc ? '↑' : '↓') : '↕'
-  $('#unitArrow').textContent = '↕'
+  $('#discArrow').textContent = '↕'
+  renderTable()
+})
+$('#thDisc').addEventListener('click', ()=>{
+  sortState = { key:'disc', asc: (sortState.key==='disc' ? !sortState.asc : true) }
+  $('#discArrow').textContent = sortState.key==='disc' ? (sortState.asc ? '↑' : '↓') : '↕'
+  $('#codeArrow').textContent = '↕'
   renderTable()
 })
 
-// 外觀：緊湊模式切換
+// 外觀：緊湊模式切換（可選）
 const rootWrap = document.querySelector('.wrap')
 $('#btnCompact')?.addEventListener('click',()=>{ rootWrap.classList.toggle('compact') })
 </script>
